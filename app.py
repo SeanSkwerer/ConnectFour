@@ -1,17 +1,20 @@
 #!/usr/bin/env python
 
 import asyncio
+import http
 import json
+import os
 import secrets
+import signal 
 
-from websockets.asyncio.server import serve, broadcast
+from websockets.asyncio.server import broadcast, serve
 
 from connect4 import PLAYER1, PLAYER2, Connect4
 
 JOIN = {}
 
 WATCH = {}
-
+    
 async def error(websocket, message):
     event = {
         "type": "error",
@@ -86,7 +89,7 @@ async def start(websocket):
     JOIN[join_key] = game, connected
 
     watch_key = secrets.token_urlsafe(12)
-    WATCH[watch_key] = connected
+    WATCH[watch_key] = game, connected
 
     try:
         # Send the secret access tokens to the browser of the first player,
@@ -166,11 +169,17 @@ async def handler(websocket):
     else:
         # First player starts a new game.
         await start(websocket)
-    
-async def main():
-    async with serve(handler, "", 8001) as server:
-        await server.serve_forever()
 
+def health_check(connection, request):
+    if request.path == "/healthz":
+        return connection.respond(http.HTTPStatus.OK, "OK\n")
+
+async def main():
+    port = int(os.environ.get("PORT", "8001"))
+    async with serve(handler, "", port, process_request=health_check) as server:
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGTERM, server.close)
+        await server.wait_closed()
 
 if __name__ == "__main__":
     asyncio.run(main())
